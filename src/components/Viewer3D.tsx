@@ -94,6 +94,10 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({
   const [showGrid, setShowGrid] = useState(true);
   const [measurementUnit, setMeasurementUnit] = useState<MeasurementUnit>('m');
   const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const isCompareOpenRef = useRef(false);
+  useEffect(() => {
+    isCompareOpenRef.current = isCompareOpen;
+  }, [isCompareOpen]);
 
   // Dynamic Guide References
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
@@ -202,6 +206,9 @@ export const Viewer3D: React.FC<Viewer3DProps> = ({
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+      if (isCompareOpenRef.current) {
+        return;
+      }
       const delta = clock.getDelta();
 
       if (mixerRef.current && isPlayingAnimation) {

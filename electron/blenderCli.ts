@@ -178,48 +178,57 @@ export async function detectBlender(customPath?: string): Promise<BlenderInfo> {
 /**
  * Headlessly exports a .blend file to a temporary .glb for 3D interactive viewing.
  */
+// Ongoing export conversions map to prevent parallel process collisions on the same file
+const ongoingConversions = new Map<string, Promise<{ success: boolean; glbPath?: string; error?: string }>>();
+
 export async function exportBlendToGlb(blendPath: string): Promise<{ success: boolean; glbPath?: string; error?: string }> {
-  const info = await detectBlender();
-  if (!info.isAvailable || !info.executablePath) {
-    return { success: false, error: 'Blender is not installed or could not be detected.' };
+  const normPath = path.resolve(blendPath);
+  if (ongoingConversions.has(normPath)) {
+    return ongoingConversions.get(normPath)!;
   }
 
-  const tempDir = path.join(os.tmpdir(), 'model_vault_3d_temp');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
+  const exportPromise = (async () => {
+    const info = await detectBlender();
+    if (!info.isAvailable || !info.executablePath) {
+      return { success: false, error: 'Blender is not installed or could not be detected.' };
+    }
 
-  // Generate deterministic cache key based on file path, size, and modified time
-  let cacheKey = '';
-  try {
-    const stats = await fs.promises.stat(blendPath);
-    cacheKey = crypto
-      .createHash('md5')
-      .update(`${path.resolve(blendPath)}_${stats.size}_${stats.mtimeMs}`)
-      .digest('hex')
-      .substring(0, 12);
-  } catch {
-    cacheKey = String(Date.now());
-  }
+    const tempDir = path.join(os.tmpdir(), 'model_vault_3d_temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
 
-  const baseName = path.basename(blendPath, path.extname(blendPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
-  const glbPath = path.join(tempDir, `${baseName}_${cacheKey}.glb`);
-
-  // Instant cache hit: Return immediately if previously converted!
-  if (fs.existsSync(glbPath)) {
+    // Generate deterministic cache key based on file path, size, and modified time
+    let cacheKey = '';
     try {
-      const glbStat = await fs.promises.stat(glbPath);
-      if (glbStat.size > 0) {
-        return { success: true, glbPath };
-      }
-    } catch {}
-  }
+      const stats = await fs.promises.stat(blendPath);
+      cacheKey = crypto
+        .createHash('md5')
+        .update(`${path.resolve(blendPath)}_${stats.size}_${stats.mtimeMs}`)
+        .digest('hex')
+        .substring(0, 12);
+    } catch {
+      cacheKey = String(Date.now());
+    }
 
-  const timestamp = Date.now();
-  const scriptPath = path.join(tempDir, `export_${cacheKey}_${timestamp}.py`);
+    const baseName = path.basename(blendPath, path.extname(blendPath)).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const glbPath = path.join(tempDir, `${baseName}_${cacheKey}.glb`);
 
-  // Python script to export active scene to GLB with all objects unhidden
-  const pyCode = `import bpy, sys
+    // Instant cache hit: Return immediately if previously converted!
+    if (fs.existsSync(glbPath)) {
+      try {
+        const glbStat = await fs.promises.stat(glbPath);
+        if (glbStat.size > 0) {
+          return { success: true, glbPath };
+        }
+      } catch {}
+    }
+
+    const timestamp = Date.now();
+    const scriptPath = path.join(tempDir, `export_${cacheKey}_${timestamp}.py`);
+
+    // Python script to export active scene to GLB with all objects unhidden
+    const pyCode = `import bpy, sys
 try:
     for obj in bpy.data.objects:
         obj.hide_viewport = False
@@ -236,28 +245,36 @@ except Exception as e:
     sys.exit(1)
 `;
 
-  try {
-    await fs.promises.writeFile(scriptPath, pyCode, 'utf-8');
+    try {
+      await fs.promises.writeFile(scriptPath, pyCode, 'utf-8');
 
-    const { stdout, stderr } = await execFileAsync(
-      info.executablePath,
-      ['-b', blendPath, '-P', scriptPath],
-      { timeout: 60000 }
-    );
+      const { stdout, stderr } = await execFileAsync(
+        info.executablePath,
+        ['-b', blendPath, '-P', scriptPath],
+        { timeout: 60000 }
+      );
 
-    // Clean up temporary script
-    try { await fs.promises.unlink(scriptPath); } catch {}
+      // Clean up temporary script
+      try { await fs.promises.unlink(scriptPath); } catch {}
 
-    if (fs.existsSync(glbPath) && (await fs.promises.stat(glbPath)).size > 0) {
-      return { success: true, glbPath };
-    } else {
-      return {
-        success: false,
-        error: `Blender completed but GLB file was not created. ${stderr || stdout}`,
-      };
+      if (fs.existsSync(glbPath) && (await fs.promises.stat(glbPath)).size > 0) {
+        return { success: true, glbPath };
+      } else {
+        return {
+          success: false,
+          error: `Blender completed but GLB file was not created. ${stderr || stdout}`,
+        };
+      }
+    } catch (err: any) {
+      try { await fs.promises.unlink(scriptPath); } catch {}
+      return { success: false, error: err.message || 'Blender conversion failed' };
     }
-  } catch (err: any) {
-    try { await fs.promises.unlink(scriptPath); } catch {}
-    return { success: false, error: err.message || 'Blender conversion failed' };
+  })();
+
+  ongoingConversions.set(normPath, exportPromise);
+  try {
+    return await exportPromise;
+  } finally {
+    ongoingConversions.delete(normPath);
   }
 }

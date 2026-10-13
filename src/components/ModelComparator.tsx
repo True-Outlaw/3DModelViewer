@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -11,11 +11,9 @@ import {
   RotateCw,
   Box,
   Columns2,
-  Maximize2,
   ChevronDown,
-  Layers,
   ArrowRightLeft,
-  Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import type { ModelAsset } from '../types';
 import { formatBytes, formatNumber, getFormatBadgeStyle } from '../utils/formatters';
@@ -40,18 +38,26 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
 }) => {
   // Model selections
   const [assetA, setAssetA] = useState<ModelAsset>(primaryAsset);
-  const [assetB, setAssetB] = useState<ModelAsset>(
-    allAssets.find((a) => a.id !== primaryAsset.id) || primaryAsset
-  );
+  const [assetB, setAssetB] = useState<ModelAsset>(() => {
+    return allAssets.find((a) => a.id !== primaryAsset.id) || primaryAsset;
+  });
 
   // Viewport states
   const [shadingA, setShadingA] = useState<ShadingMode>('textured');
-  const [shadingB, setShadingB] = useState<ShadingMode>(assetA.id === assetB.id ? 'wireframe' : 'textured');
+  const [shadingB, setShadingB] = useState<ShadingMode>(
+    assetA.id === assetB.id ? 'wireframe' : 'textured'
+  );
   const [isTurntable, setIsTurntable] = useState(true);
 
   // Stats
   const [statsA, setStatsA] = useState({ vertices: 0, triangles: 0, size: { x: 0, y: 0, z: 0 } });
   const [statsB, setStatsB] = useState({ vertices: 0, triangles: 0, size: { x: 0, y: 0, z: 0 } });
+
+  // Loading & Error states
+  const [loadingA, setLoadingA] = useState(true);
+  const [loadingB, setLoadingB] = useState(true);
+  const [errorA, setErrorA] = useState<string | null>(null);
+  const [errorB, setErrorB] = useState<string | null>(null);
 
   // DOM Canvas Containers
   const containerARef = useRef<HTMLDivElement>(null);
@@ -67,17 +73,33 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
   const modelARef = useRef<THREE.Object3D | null>(null);
   const modelBRef = useRef<THREE.Object3D | null>(null);
 
-  const [loadingA, setLoadingA] = useState(true);
-  const [loadingB, setLoadingB] = useState(true);
+  // Mutual recursion & interaction locks
+  const isSyncingRef = useRef(false);
+  const activeControlRef = useRef<'A' | 'B' | null>(null);
+
+  // Escape key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // Shared Helper: Load and parse model
-  const loadModelObject = async (asset: ModelAsset): Promise<{ object: THREE.Object3D; tris: number; verts: number; dims: THREE.Vector3 }> => {
+  const loadModelObject = async (
+    asset: ModelAsset
+  ): Promise<{ object: THREE.Object3D; tris: number; verts: number; dims: THREE.Vector3 }> => {
     let targetPath = asset.path;
     let format = asset.format;
 
     if (asset.format === 'blend') {
       const res = await window.electronAPI.exportBlendToGlb(asset.path);
-      if (!res.success || !res.glbPath) throw new Error(res.error || 'Blender export failed');
+      if (!res.success || !res.glbPath) {
+        throw new Error(res.error || 'Blender export failed. Ensure Blender is installed.');
+      }
       targetPath = res.glbPath;
       format = 'glb';
     }
@@ -125,7 +147,9 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
       const text = new TextDecoder('utf-8').decode(buffer);
       try {
         const report = await window.electronAPI.inspectDependencies(targetPath);
-        const mtlDep = report.dependencies.find((d) => d.name.toLowerCase().endsWith('.mtl') && d.status === 'found');
+        const mtlDep = report.dependencies.find(
+          (d) => d.name.toLowerCase().endsWith('.mtl') && d.status === 'found'
+        );
         if (mtlDep && mtlDep.resolvedPath) {
           const mtlBuf = await window.electronAPI.readModelBuffer(mtlDep.resolvedPath);
           const mtlText = new TextDecoder('utf-8').decode(mtlBuf);
@@ -137,20 +161,24 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
           objLoader.setMaterials(materials);
         }
       } catch {
-        // ignore
+        // Non-fatal material load
       }
       loadedObject = objLoader.parse(text);
     } else if (format === 'stl') {
       const stlLoader = new STLLoader(loadingManager);
       const geom = stlLoader.parse(buffer);
       geom.computeVertexNormals();
-      const mat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, roughness: 0.35, metalness: 0.1 });
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x93c5fd,
+        roughness: 0.35,
+        metalness: 0.1,
+      });
       loadedObject = new THREE.Mesh(geom, mat);
     } else {
-      throw new Error(`Unsupported format: ${format}`);
+      throw new Error(`Unsupported 3D format: ${format}`);
     }
 
-    // Centering & Bounding Box
+    // Auto-center on ground plane
     const box = new THREE.Box3().setFromObject(loadedObject);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -158,7 +186,7 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     loadedObject.position.y -= box.min.y;
     loadedObject.position.z -= center.z;
 
-    // Compute stats
+    // Compute triangle and vertex statistics
     let tris = 0;
     let verts = 0;
     loadedObject.traverse((c) => {
@@ -181,14 +209,39 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     return { object: loadedObject, tris: Math.round(tris), verts, dims: size };
   };
 
-  // Sync camera helper: when camera A or B moves, sync position & target
-  const syncCameras = (sourceCam: THREE.PerspectiveCamera, targetCam: THREE.PerspectiveCamera, sourceCtrl: OrbitControls, targetCtrl: OrbitControls) => {
-    targetCam.position.copy(sourceCam.position);
+  // Helper to frame camera around an object
+  const frameCamera = (
+    camera: THREE.PerspectiveCamera,
+    controls: OrbitControls,
+    object: THREE.Object3D
+  ) => {
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z, 0.2);
+
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.7;
+    cameraZ = Math.max(cameraZ, 2.2);
+
+    camera.position.set(cameraZ * 0.75, cameraZ * 0.65, cameraZ);
+    camera.lookAt(0, size.y / 2, 0);
+    controls.target.set(0, size.y / 2, 0);
+    controls.update();
+  };
+
+  // Sync camera helper: copies relative angle, distance, and zoom without recursion
+  const syncCameras = (
+    sourceCam: THREE.PerspectiveCamera,
+    targetCam: THREE.PerspectiveCamera,
+    sourceCtrl: OrbitControls,
+    targetCtrl: OrbitControls
+  ) => {
+    const offset = new THREE.Vector3().subVectors(sourceCam.position, sourceCtrl.target);
+    targetCam.position.copy(targetCtrl.target).add(offset);
     targetCam.quaternion.copy(sourceCam.quaternion);
     targetCam.zoom = sourceCam.zoom;
     targetCam.updateProjectionMatrix();
 
-    targetCtrl.target.copy(sourceCtrl.target);
     targetCtrl.update();
   };
 
@@ -197,19 +250,19 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     if (!containerARef.current) return;
     let disposed = false;
     const container = containerARef.current;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0c13);
     sceneARef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 5000);
+    const initialW = Math.max(container.clientWidth, 100);
+    const initialH = Math.max(container.clientHeight, 100);
+    const camera = new THREE.PerspectiveCamera(45, initialW / initialH, 0.05, 5000);
     camera.position.set(2, 2, 3);
     cameraARef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(w, h);
+    renderer.setSize(initialW, initialH);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.innerHTML = '';
@@ -218,23 +271,40 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    // Turntable runs from controls A and syncs camera B
     controls.autoRotate = isTurntable;
+    controls.autoRotateSpeed = 2.0;
     controlsARef.current = controls;
 
-    // Sync camera A -> camera B
+    // Track active user interaction
+    controls.addEventListener('start', () => {
+      activeControlRef.current = 'A';
+    });
+    controls.addEventListener('end', () => {
+      activeControlRef.current = null;
+    });
+
+    // Sync camera A -> camera B safely
     controls.addEventListener('change', () => {
-      if (cameraBRef.current && controlsBRef.current) {
+      if (isSyncingRef.current) return;
+      if (!cameraBRef.current || !controlsBRef.current) return;
+      if (activeControlRef.current === 'B') return;
+
+      isSyncingRef.current = true;
+      try {
         syncCameras(camera, cameraBRef.current, controls, controlsBRef.current);
+      } finally {
+        isSyncingRef.current = false;
       }
     });
 
-    // Lights & Grid
-    const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+    // Lighting & Grid
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
     scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    const key = new THREE.DirectionalLight(0xffffff, 2.0);
     key.position.set(5, 10, 7);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x818cf8, 0.8);
+    const fill = new THREE.DirectionalLight(0x818cf8, 0.9);
     fill.position.set(-5, 4, -5);
     scene.add(fill);
 
@@ -249,18 +319,22 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     };
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const nw = container.clientWidth;
-      const nh = container.clientHeight;
-      camera.aspect = nw / nh;
-      camera.updateProjectionMatrix();
-      renderer.setSize(nw, nh);
-    };
-    window.addEventListener('resize', handleResize);
+    // ResizeObserver ensures canvas always fills viewport accurately
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+          renderer.setSize(width, height);
+        }
+      }
+    });
+    ro.observe(container);
 
     // Load Model A
     setLoadingA(true);
+    setErrorA(null);
     loadModelObject(assetA)
       .then((res) => {
         if (disposed) return;
@@ -269,19 +343,26 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
         setStatsA({
           vertices: res.verts,
           triangles: res.tris,
-          size: { x: parseFloat(res.dims.x.toFixed(2)), y: parseFloat(res.dims.y.toFixed(2)), z: parseFloat(res.dims.z.toFixed(2)) },
+          size: {
+            x: parseFloat(res.dims.x.toFixed(2)),
+            y: parseFloat(res.dims.y.toFixed(2)),
+            z: parseFloat(res.dims.z.toFixed(2)),
+          },
         });
+        frameCamera(camera, controls, res.object);
         setLoadingA(false);
       })
       .catch((err) => {
+        if (disposed) return;
         console.error('Error loading Model A in comparator:', err);
+        setErrorA(err?.message || 'Failed to parse 3D model.');
         setLoadingA(false);
       });
 
     return () => {
       disposed = true;
       cancelAnimationFrame(animId);
-      window.removeEventListener('resize', handleResize);
+      ro.disconnect();
       disposeThreeScene(scene, renderer, controls);
       sceneARef.current = null;
       cameraARef.current = null;
@@ -295,19 +376,19 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     if (!containerBRef.current) return;
     let disposed = false;
     const container = containerBRef.current;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0c13);
     sceneBRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 5000);
+    const initialW = Math.max(container.clientWidth, 100);
+    const initialH = Math.max(container.clientHeight, 100);
+    const camera = new THREE.PerspectiveCamera(45, initialW / initialH, 0.05, 5000);
     camera.position.set(2, 2, 3);
     cameraBRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(w, h);
+    renderer.setSize(initialW, initialH);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     container.innerHTML = '';
@@ -316,23 +397,39 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.autoRotate = isTurntable;
+    // Follower viewport does not autoRotate independently (driven by A's sync)
+    controls.autoRotate = false;
     controlsBRef.current = controls;
 
-    // Sync camera B -> camera A
+    // Track active user interaction
+    controls.addEventListener('start', () => {
+      activeControlRef.current = 'B';
+    });
+    controls.addEventListener('end', () => {
+      activeControlRef.current = null;
+    });
+
+    // Sync camera B -> camera A safely
     controls.addEventListener('change', () => {
-      if (cameraARef.current && controlsARef.current) {
+      if (isSyncingRef.current) return;
+      if (!cameraARef.current || !controlsARef.current) return;
+      if (activeControlRef.current === 'A') return;
+
+      isSyncingRef.current = true;
+      try {
         syncCameras(camera, cameraARef.current, controls, controlsARef.current);
+      } finally {
+        isSyncingRef.current = false;
       }
     });
 
-    // Lights & Grid
-    const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+    // Lighting & Grid
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
     scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xffffff, 1.8);
+    const key = new THREE.DirectionalLight(0xffffff, 2.0);
     key.position.set(5, 10, 7);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x818cf8, 0.8);
+    const fill = new THREE.DirectionalLight(0x818cf8, 0.9);
     fill.position.set(-5, 4, -5);
     scene.add(fill);
 
@@ -347,18 +444,22 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     };
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const nw = container.clientWidth;
-      const nh = container.clientHeight;
-      camera.aspect = nw / nh;
-      camera.updateProjectionMatrix();
-      renderer.setSize(nw, nh);
-    };
-    window.addEventListener('resize', handleResize);
+    // ResizeObserver ensures canvas always fills viewport accurately
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+          renderer.setSize(width, height);
+        }
+      }
+    });
+    ro.observe(container);
 
     // Load Model B
     setLoadingB(true);
+    setErrorB(null);
     loadModelObject(assetB)
       .then((res) => {
         if (disposed) return;
@@ -367,19 +468,26 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
         setStatsB({
           vertices: res.verts,
           triangles: res.tris,
-          size: { x: parseFloat(res.dims.x.toFixed(2)), y: parseFloat(res.dims.y.toFixed(2)), z: parseFloat(res.dims.z.toFixed(2)) },
+          size: {
+            x: parseFloat(res.dims.x.toFixed(2)),
+            y: parseFloat(res.dims.y.toFixed(2)),
+            z: parseFloat(res.dims.z.toFixed(2)),
+          },
         });
+        frameCamera(camera, controls, res.object);
         setLoadingB(false);
       })
       .catch((err) => {
+        if (disposed) return;
         console.error('Error loading Model B in comparator:', err);
+        setErrorB(err?.message || 'Failed to parse 3D model.');
         setLoadingB(false);
       });
 
     return () => {
       disposed = true;
       cancelAnimationFrame(animId);
-      window.removeEventListener('resize', handleResize);
+      ro.disconnect();
       disposeThreeScene(scene, renderer, controls);
       sceneBRef.current = null;
       cameraBRef.current = null;
@@ -428,16 +536,18 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
     });
   }, [shadingB, loadingB]);
 
-  // Turntable sync
+  // Turntable sync toggle
   useEffect(() => {
-    if (controlsARef.current) controlsARef.current.autoRotate = isTurntable;
-    if (controlsBRef.current) controlsBRef.current.autoRotate = isTurntable;
+    if (controlsARef.current) {
+      controlsARef.current.autoRotate = isTurntable;
+    }
   }, [isTurntable]);
 
   // Compute Delta between Triangles
-  const triDeltaPercent = statsA.triangles > 0 && statsB.triangles > 0
-    ? (((statsB.triangles - statsA.triangles) / statsA.triangles) * 100).toFixed(1)
-    : null;
+  const triDeltaPercent =
+    statsA.triangles > 0 && statsB.triangles > 0
+      ? (((statsB.triangles - statsA.triangles) / statsA.triangles) * 100).toFixed(1)
+      : null;
 
   return (
     <div className="viewer-modal comparator-modal">
@@ -475,13 +585,22 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
         <div className="comparator-half left-half">
           {/* Top Panel Controls */}
           <div className="comparator-panel-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <span className="badge-format" style={getFormatBadgeStyle(assetA.format)}>
-                .{assetA.format}
-              </span>
-              <span className="comparator-model-title" title={assetA.name}>
-                {assetA.name}
-              </span>
+            {/* Model A Picker */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+              <select
+                className="gallery-sort-select comparator-select"
+                value={assetA.id}
+                onChange={(e) => {
+                  const found = allAssets.find((a) => a.id === e.target.value);
+                  if (found) setAssetA(found);
+                }}
+              >
+                {allAssets.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} (.{a.format})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Shading mode selector */}
@@ -500,7 +619,9 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
           </div>
 
           <div ref={containerARef} className="comparator-canvas-wrapper" />
-          {loadingA && (
+
+          {/* Loading overlay */}
+          {loadingA && !errorA && (
             <div className="viewer-loading-overlay">
               <div className="spinner-dual-ring">
                 <div className="spinner"></div>
@@ -514,27 +635,57 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
             </div>
           )}
 
+          {/* Error overlay */}
+          {errorA && (
+            <div className="viewer-loading-overlay" style={{ background: 'rgba(11, 13, 19, 0.95)' }}>
+              <AlertTriangle size={36} color="#ef4444" />
+              <div className="loading-status-text" style={{ color: '#ef4444', marginTop: '10px' }}>
+                Failed to Load Model A
+              </div>
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-subtle)',
+                  maxWidth: '320px',
+                  textAlign: 'center',
+                  marginTop: '6px',
+                }}
+              >
+                {errorA}
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setAssetA({ ...assetA })}
+                style={{ marginTop: '12px' }}
+              >
+                Retry Load
+              </button>
+            </div>
+          )}
+
           {/* Stats Box A */}
-          <div className="comparator-hud-card">
-            <div className="hud-stat-line">
-              <span>Triangles:</span>
-              <strong className="hud-stat-val">{formatNumber(statsA.triangles)}</strong>
+          {!loadingA && !errorA && (
+            <div className="comparator-hud-card">
+              <div className="hud-stat-line">
+                <span>Triangles:</span>
+                <strong className="hud-stat-val">{formatNumber(statsA.triangles)}</strong>
+              </div>
+              <div className="hud-stat-line">
+                <span>Vertices:</span>
+                <span className="hud-stat-val">{formatNumber(statsA.vertices)}</span>
+              </div>
+              <div className="hud-stat-line">
+                <span>Dimensions:</span>
+                <span className="hud-stat-val">
+                  {statsA.size.x} × {statsA.size.y} × {statsA.size.z} m
+                </span>
+              </div>
+              <div className="hud-stat-line">
+                <span>File Size:</span>
+                <span className="hud-stat-val">{formatBytes(assetA.sizeBytes)}</span>
+              </div>
             </div>
-            <div className="hud-stat-line">
-              <span>Vertices:</span>
-              <span className="hud-stat-val">{formatNumber(statsA.vertices)}</span>
-            </div>
-            <div className="hud-stat-line">
-              <span>Dimensions:</span>
-              <span className="hud-stat-val">
-                {statsA.size.x} × {statsA.size.y} × {statsA.size.z} m
-              </span>
-            </div>
-            <div className="hud-stat-line">
-              <span>File Size:</span>
-              <span className="hud-stat-val">{formatBytes(assetA.sizeBytes)}</span>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Center Comparison Badge */}
@@ -543,8 +694,12 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
             <ArrowRightLeft size={14} />
             <span>VS</span>
           </div>
-          {triDeltaPercent && (
-            <div className={`comparator-delta-pill ${parseFloat(triDeltaPercent) < 0 ? 'reduced' : 'increased'}`}>
+          {triDeltaPercent && !loadingA && !loadingB && !errorA && !errorB && (
+            <div
+              className={`comparator-delta-pill ${
+                parseFloat(triDeltaPercent) < 0 ? 'reduced' : 'increased'
+              }`}
+            >
               {parseFloat(triDeltaPercent) > 0 ? `+${triDeltaPercent}%` : `${triDeltaPercent}%`} tris
             </div>
           )}
@@ -588,7 +743,9 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
           </div>
 
           <div ref={containerBRef} className="comparator-canvas-wrapper" />
-          {loadingB && (
+
+          {/* Loading overlay */}
+          {loadingB && !errorB && (
             <div className="viewer-loading-overlay">
               <div className="spinner-dual-ring">
                 <div className="spinner"></div>
@@ -602,29 +759,60 @@ export const ModelComparator: React.FC<ModelComparatorProps> = ({
             </div>
           )}
 
+          {/* Error overlay */}
+          {errorB && (
+            <div className="viewer-loading-overlay" style={{ background: 'rgba(11, 13, 19, 0.95)' }}>
+              <AlertTriangle size={36} color="#ef4444" />
+              <div className="loading-status-text" style={{ color: '#ef4444', marginTop: '10px' }}>
+                Failed to Load Model B
+              </div>
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--text-subtle)',
+                  maxWidth: '320px',
+                  textAlign: 'center',
+                  marginTop: '6px',
+                }}
+              >
+                {errorB}
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setAssetB({ ...assetB })}
+                style={{ marginTop: '12px' }}
+              >
+                Retry Load
+              </button>
+            </div>
+          )}
+
           {/* Stats Box B */}
-          <div className="comparator-hud-card">
-            <div className="hud-stat-line">
-              <span>Triangles:</span>
-              <strong className="hud-stat-val">{formatNumber(statsB.triangles)}</strong>
+          {!loadingB && !errorB && (
+            <div className="comparator-hud-card">
+              <div className="hud-stat-line">
+                <span>Triangles:</span>
+                <strong className="hud-stat-val">{formatNumber(statsB.triangles)}</strong>
+              </div>
+              <div className="hud-stat-line">
+                <span>Vertices:</span>
+                <span className="hud-stat-val">{formatNumber(statsB.vertices)}</span>
+              </div>
+              <div className="hud-stat-line">
+                <span>Dimensions:</span>
+                <span className="hud-stat-val">
+                  {statsB.size.x} × {statsB.size.y} × {statsB.size.z} m
+                </span>
+              </div>
+              <div className="hud-stat-line">
+                <span>File Size:</span>
+                <span className="hud-stat-val">{formatBytes(assetB.sizeBytes)}</span>
+              </div>
             </div>
-            <div className="hud-stat-line">
-              <span>Vertices:</span>
-              <span className="hud-stat-val">{formatNumber(statsB.vertices)}</span>
-            </div>
-            <div className="hud-stat-line">
-              <span>Dimensions:</span>
-              <span className="hud-stat-val">
-                {statsB.size.x} × {statsB.size.y} × {statsB.size.z} m
-              </span>
-            </div>
-            <div className="hud-stat-line">
-              <span>File Size:</span>
-              <span className="hud-stat-val">{formatBytes(assetB.sizeBytes)}</span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
+export default ModelComparator;
