@@ -1,11 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import type { ModelAsset, ModelFormat, ScanOptions, ScanProgress, BlenderInfo, ModelCollection, AppTheme } from './types';
+import type {
+  ModelAsset,
+  ModelFormat,
+  ScanOptions,
+  ScanProgress,
+  BlenderInfo,
+  ModelCollection,
+  AppTheme,
+  UpdateState,
+} from './types';
 import { Header } from './components/Header';
 import { Sidebar, ViewFilter, CardSize } from './components/Sidebar';
 import { Gallery, SortOrder } from './components/Gallery';
 import { Viewer3D } from './components/Viewer3D';
 import { ScanModal } from './components/ScanModal';
 import { BlenderModal } from './components/BlenderModal';
+import { UpdateNotification } from './components/UpdateNotification';
 import { ContextMenu, ContextMenuState } from './components/ContextMenu';
 
 export const App: React.FC = () => {
@@ -27,6 +37,10 @@ export const App: React.FC = () => {
   const [skipBlenderPrompt, setSkipBlenderPrompt] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Auto-Update State
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
+  const [isUpdateNotificationVisible, setIsUpdateNotificationVisible] = useState(true);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -80,7 +94,13 @@ export const App: React.FC = () => {
         console.warn('[App] Error initializing Blender info / settings:', err);
       });
 
-    // 4. Listen to live scanner events
+    // 4. Auto-update listener
+    const unsubUpdate = window.electronAPI.onUpdateStatus((state) => {
+      setUpdateState(state);
+      setIsUpdateNotificationVisible(true);
+    });
+
+    // 5. Listen to live scanner events
     const unsubProgress = window.electronAPI.onScanProgress((prog) => {
       setScanProgress(prog);
       if (prog.status === 'completed') {
@@ -106,6 +126,7 @@ export const App: React.FC = () => {
     });
 
     return () => {
+      unsubUpdate();
       unsubProgress();
       unsubAssetFound();
       unsubComplete();
@@ -342,6 +363,25 @@ export const App: React.FC = () => {
     setActiveAssetForViewer(asset);
   };
 
+  const handleManualCheckUpdates = async () => {
+    showToast('Checking GitHub for new releases...');
+    const result = await window.electronAPI.checkForUpdates();
+    if (result.status === 'not-available') {
+      showToast("You're running the latest version of Model Vault 3D!");
+    } else if (result.status === 'error') {
+      showToast(result.error || 'Could not reach update server.');
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    showToast('Starting update download in background...');
+    await window.electronAPI.downloadUpdate();
+  };
+
+  const handleInstallUpdate = () => {
+    window.electronAPI.installUpdate();
+  };
+
   return (
     <div className="app-container">
       {/* Top Header */}
@@ -351,8 +391,11 @@ export const App: React.FC = () => {
         totalModels={assets.length}
         totalBytes={totalBytes}
         blenderInfo={blenderInfo}
+        updateState={updateState}
         onOpenScanModal={() => setIsScanModalOpen(true)}
         onOpenBlenderModal={() => setIsBlenderModalOpen(true)}
+        onCheckForUpdates={handleManualCheckUpdates}
+        onOpenUpdateNotification={() => setIsUpdateNotificationVisible(true)}
         onClearCache={handleClearCache}
         currentTheme={theme}
         onThemeChange={setTheme}
@@ -444,6 +487,16 @@ export const App: React.FC = () => {
         initialSkipPreference={skipBlenderPrompt}
         onSkipStartupPrompt={(skip) => setSkipBlenderPrompt(skip)}
       />
+
+      {/* Auto-Update Notification Banner */}
+      {isUpdateNotificationVisible && (
+        <UpdateNotification
+          updateState={updateState}
+          onDownload={handleDownloadUpdate}
+          onInstall={handleInstallUpdate}
+          onDismiss={() => setIsUpdateNotificationVisible(false)}
+        />
+      )}
 
       {/* Milestone 2: Context Menu */}
       <ContextMenu

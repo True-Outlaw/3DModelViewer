@@ -2047,3 +2047,10 @@ body {
 .spin { animation: spin 1s linear infinite; }
 .blender-badge-warning:hover { filter: brightness(1.15); }
 
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.spin-slow { animation: spin 3s linear infinite; }
+

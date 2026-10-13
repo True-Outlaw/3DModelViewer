@@ -56,6 +56,35 @@ export interface AppSettings {
   skipBlenderPrompt?: boolean;
 }
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateInfo {
+  version: string;
+  releaseNotes?: string;
+  releaseDate?: string;
+}
+
+export interface UpdateProgress {
+  percent: number;
+  bytesPerSecond: number;
+  transferred: number;
+  total: number;
+}
+
+export interface UpdateState {
+  status: UpdateStatus;
+  info?: UpdateInfo | null;
+  progress?: UpdateProgress | null;
+  error?: string | null;
+}
+
 export type TextureMapType =
   | 'albedo'
   | 'normal'
@@ -117,6 +146,11 @@ export interface ElectronAPI {
   createCollection: (name: string, color?: string) => Promise<ModelCollection>;
   deleteCollection: (id: string) => Promise<void>;
   toggleAssetCollection: (assetId: string, collectionId: string) => Promise<boolean>;
+  // Auto-Update
+  checkForUpdates: () => Promise<UpdateState>;
+  downloadUpdate: () => Promise<void>;
+  installUpdate: () => void;
+  onUpdateStatus: (callback: (state: UpdateState) => void) => () => void;
   // Milestone 2
   startDrag: (filePath: string, iconDataUrl?: string) => void;
   inspectDependencies: (filePath: string) => Promise<DependencyReport>;

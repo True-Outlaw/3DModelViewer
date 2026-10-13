@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Search, X, HardDrive, RefreshCw } from 'lucide-react';
-import type { BlenderInfo, AppTheme } from '../types';
+import { Box, Search, X, HardDrive, RefreshCw, Sparkles, Download, CheckCircle2 } from 'lucide-react';
+import type { BlenderInfo, AppTheme, UpdateState } from '../types';
 import { formatBytes, formatNumber } from '../utils/formatters';
 import { ThemeSelector } from './ThemeSelector';
 
@@ -10,8 +10,11 @@ interface HeaderProps {
   totalModels: number;
   totalBytes: number;
   blenderInfo: BlenderInfo | null;
+  updateState: UpdateState;
   onOpenScanModal: () => void;
   onOpenBlenderModal: () => void;
+  onCheckForUpdates: () => void;
+  onOpenUpdateNotification: () => void;
   onClearCache: () => void;
   currentTheme: AppTheme;
   onThemeChange: (theme: AppTheme) => void;
@@ -23,8 +26,11 @@ export const Header: React.FC<HeaderProps> = ({
   totalModels,
   totalBytes,
   blenderInfo,
+  updateState,
   onOpenScanModal,
   onOpenBlenderModal,
+  onCheckForUpdates,
+  onOpenUpdateNotification,
   onClearCache,
   currentTheme,
   onThemeChange,
@@ -63,6 +69,62 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Status & Actions */}
       <div className="header-actions">
+        {/* Auto-Update Badge (when update is available, downloading, or ready) */}
+        {updateState.status === 'available' && (
+          <button
+            className="btn btn-secondary"
+            onClick={onOpenUpdateNotification}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              background: 'rgba(99, 102, 241, 0.15)',
+              borderColor: 'rgba(99, 102, 241, 0.4)',
+              color: '#a5b4fc',
+              gap: '6px',
+            }}
+            title="Click to view and install update"
+          >
+            <Sparkles size={13} className="spin-slow" />
+            <span>Update v{updateState.info?.version}</span>
+          </button>
+        )}
+
+        {updateState.status === 'downloading' && (
+          <button
+            className="btn btn-secondary"
+            onClick={onOpenUpdateNotification}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              background: 'rgba(99, 102, 241, 0.15)',
+              borderColor: 'rgba(99, 102, 241, 0.4)',
+              color: '#a5b4fc',
+              gap: '6px',
+            }}
+          >
+            <Download size={13} className="spin" />
+            <span>Downloading {updateState.progress?.percent || 0}%</span>
+          </button>
+        )}
+
+        {updateState.status === 'downloaded' && (
+          <button
+            className="btn btn-primary"
+            onClick={onOpenUpdateNotification}
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              background: '#22c55e',
+              borderColor: '#16a34a',
+              gap: '6px',
+            }}
+            title="Restart app to apply update"
+          >
+            <CheckCircle2 size={13} />
+            <span>Install Update</span>
+          </button>
+        )}
+
         {/* Blender status badge / button */}
         {blenderInfo?.isAvailable ? (
           <button
@@ -105,6 +167,17 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Theme Selector */}
         <ThemeSelector currentTheme={currentTheme} onThemeChange={onThemeChange} />
+
+        {/* Check for updates manually button */}
+        <button
+          className="btn btn-secondary"
+          onClick={onCheckForUpdates}
+          title={updateState.status === 'checking' ? 'Checking for updates...' : 'Check for new releases'}
+          disabled={updateState.status === 'checking'}
+        >
+          <Sparkles size={14} className={updateState.status === 'checking' ? 'spin' : ''} />
+          <span>{updateState.status === 'checking' ? 'Checking...' : 'Updates'}</span>
+        </button>
 
         <button className="btn btn-secondary" onClick={onClearCache} title="Clear index cache">
           <RefreshCw size={14} />

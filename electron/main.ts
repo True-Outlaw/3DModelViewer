@@ -6,6 +6,7 @@ import { DiskScanner } from './scanner';
 import { AssetStore } from './store';
 import { detectBlender, exportBlendToGlb, setCustomBlenderPath } from './blenderCli';
 import { inspectModelDependencies, relinkModelTextures } from './textureInspector';
+import { initAutoUpdater } from './updater';
 import type { ScanOptions, AppSettings } from '../src/types';
 
 // Enforce single instance lock
@@ -51,6 +52,9 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    if (mainWindow) {
+      initAutoUpdater(mainWindow);
+    }
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ElectronAPI, ModelAsset, ScanOptions, ScanProgress, BlenderInfo, AppSettings } from '../src/types';
+import type { ElectronAPI, ModelAsset, ScanOptions, ScanProgress, BlenderInfo, AppSettings, UpdateState } from '../src/types';
 
 const api: ElectronAPI = {
   getAvailableDrives: () => ipcRenderer.invoke('vault:get-drives'),
@@ -54,6 +54,18 @@ const api: ElectronAPI = {
   deleteCollection: (id: string) => ipcRenderer.invoke('vault:delete-collection', id),
   toggleAssetCollection: (assetId: string, collectionId: string) =>
     ipcRenderer.invoke('vault:toggle-asset-collection', assetId, collectionId),
+  // Auto-Update
+  checkForUpdates: () => ipcRenderer.invoke('vault:check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('vault:download-update'),
+  installUpdate: () => ipcRenderer.send('vault:install-update'),
+  onUpdateStatus: (callback: (state: UpdateState) => void) => {
+    const subscription = (_event: any, state: UpdateState) => callback(state);
+    ipcRenderer.on('vault:update-status', subscription);
+    return () => {
+      ipcRenderer.removeListener('vault:update-status', subscription);
+    };
+  },
+  // Milestone 2
   startDrag: (filePath: string, iconDataUrl?: string) =>
     ipcRenderer.send('vault:start-drag', filePath, iconDataUrl),
   inspectDependencies: (filePath: string) =>
