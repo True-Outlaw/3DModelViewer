@@ -1,0 +1,49 @@
+{
+  "name": "model-vault-3d",
+  "version": "1.0.0",
+  "description": "High-performance 3D Model Asset Browser & Viewport for Windows",
+  "main": "dist-electron/main.js",
+  "productName": "Model Vault 3D",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "keywords": [
+    "3d",
+    "asset-browser",
+    "blender",
+    "fbx",
+    "gltf",
+    "threejs",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "fflate": "^0.8.2",
+    "lucide-react": "^1.16.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.170.0",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}

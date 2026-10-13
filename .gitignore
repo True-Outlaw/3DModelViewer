@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Production & Packaging
+dist/
+dist-electron/
+release/
+.vite/
+
+# Temporary and test files
+*.log
+test_out.glb
+test_suzanne*
+
+# OS specific
+Thumbs.db
+.DS_Store
