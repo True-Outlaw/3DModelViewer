@@ -1,20 +1,23 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import type { ModelAsset, ModelCollection } from '../src/types';
+import type { ModelAsset, ModelCollection, AppSettings } from '../src/types';
 
 export class AssetStore {
   private dataDir: string;
   private dbPath: string;
   private collectionsPath: string;
+  private settingsPath: string;
   private thumbnailsDir: string;
   private assetsMap: Map<string, ModelAsset> = new Map();
   private collectionsMap: Map<string, ModelCollection> = new Map();
+  private settings: AppSettings = {};
 
   constructor() {
     this.dataDir = path.join(app.getPath('userData'), 'vault_data');
     this.dbPath = path.join(this.dataDir, 'assets_index.json');
     this.collectionsPath = path.join(this.dataDir, 'collections.json');
+    this.settingsPath = path.join(this.dataDir, 'settings.json');
     this.thumbnailsDir = path.join(this.dataDir, 'thumbnails');
     this.ensureDirs();
     this.loadFromDisk();
@@ -48,6 +51,11 @@ export class AssetStore {
           this.collectionsMap.set(item.id, item);
         }
       }
+
+      if (fs.existsSync(this.settingsPath)) {
+        const raw = fs.readFileSync(this.settingsPath, 'utf-8');
+        this.settings = JSON.parse(raw);
+      }
     } catch (err) {
       console.warn('[AssetStore] Failed to load index from disk:', err);
     }
@@ -60,9 +68,21 @@ export class AssetStore {
 
       const colList = Array.from(this.collectionsMap.values());
       fs.writeFileSync(this.collectionsPath, JSON.stringify(colList, null, 2), 'utf-8');
+
+      fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
     } catch (err) {
       console.error('[AssetStore] Failed to save index to disk:', err);
     }
+  }
+
+  public getSettings(): AppSettings {
+    return { ...this.settings };
+  }
+
+  public updateSettings(partial: Partial<AppSettings>): AppSettings {
+    this.settings = { ...this.settings, ...partial };
+    this.saveToDisk();
+    return { ...this.settings };
   }
 
   public getAllAssets(): ModelAsset[] {
@@ -190,4 +210,3 @@ export class AssetStore {
     this.saveToDisk();
   }
 }
-

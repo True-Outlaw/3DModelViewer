@@ -5,6 +5,7 @@ import { Sidebar, ViewFilter, CardSize } from './components/Sidebar';
 import { Gallery, SortOrder } from './components/Gallery';
 import { Viewer3D } from './components/Viewer3D';
 import { ScanModal } from './components/ScanModal';
+import { BlenderModal } from './components/BlenderModal';
 import { ContextMenu, ContextMenuState } from './components/ContextMenu';
 
 export const App: React.FC = () => {
@@ -22,6 +23,8 @@ export const App: React.FC = () => {
   const [activeAssetForViewer, setActiveAssetForViewer] = useState<ModelAsset | null>(null);
   const [openWithTextureInspector, setOpenWithTextureInspector] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+  const [isBlenderModalOpen, setIsBlenderModalOpen] = useState(false);
+  const [skipBlenderPrompt, setSkipBlenderPrompt] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -59,10 +62,23 @@ export const App: React.FC = () => {
       setCollections(cols);
     });
 
-    // 3. Detect Blender
-    window.electronAPI.getBlenderInfo().then((info) => {
-      setBlenderInfo(info);
-    });
+    // 3. Detect Blender and load user settings
+    Promise.all([
+      window.electronAPI.getBlenderInfo(),
+      window.electronAPI.getSettings(),
+    ])
+      .then(([info, settings]) => {
+        setBlenderInfo(info);
+        setSkipBlenderPrompt(!!settings.skipBlenderPrompt);
+
+        // When first opening: If Blender isn't found and user hasn't opted out, prompt the user!
+        if (!info.isAvailable && !settings.skipBlenderPrompt) {
+          setIsBlenderModalOpen(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('[App] Error initializing Blender info / settings:', err);
+      });
 
     // 4. Listen to live scanner events
     const unsubProgress = window.electronAPI.onScanProgress((prog) => {
@@ -302,6 +318,11 @@ export const App: React.FC = () => {
   };
 
   const handleOpenInBlender = (path: string) => {
+    if (!blenderInfo?.isAvailable) {
+      setIsBlenderModalOpen(true);
+      showToast('Blender not detected. Please locate Blender executable.');
+      return;
+    }
     window.electronAPI.openInBlender(path);
     showToast('Launching Blender with model...');
   };
@@ -331,6 +352,7 @@ export const App: React.FC = () => {
         totalBytes={totalBytes}
         blenderInfo={blenderInfo}
         onOpenScanModal={() => setIsScanModalOpen(true)}
+        onOpenBlenderModal={() => setIsBlenderModalOpen(true)}
         onClearCache={handleClearCache}
         currentTheme={theme}
         onThemeChange={setTheme}
@@ -406,6 +428,21 @@ export const App: React.FC = () => {
         onCancelScan={handleCancelScan}
         scanProgress={scanProgress}
         isScanning={isScanning}
+      />
+
+      {/* Blender Setup Modal */}
+      <BlenderModal
+        isOpen={isBlenderModalOpen}
+        onClose={() => setIsBlenderModalOpen(false)}
+        blenderInfo={blenderInfo}
+        onBlenderUpdated={(newInfo) => {
+          setBlenderInfo(newInfo);
+          if (newInfo.isAvailable) {
+            showToast(`Blender ${newInfo.version || ''} connected successfully!`);
+          }
+        }}
+        initialSkipPreference={skipBlenderPrompt}
+        onSkipStartupPrompt={(skip) => setSkipBlenderPrompt(skip)}
       />
 
       {/* Milestone 2: Context Menu */}

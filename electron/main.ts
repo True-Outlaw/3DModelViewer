@@ -4,9 +4,9 @@ import * as fs from 'fs';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { DiskScanner } from './scanner';
 import { AssetStore } from './store';
-import { detectBlender, exportBlendToGlb } from './blenderCli';
+import { detectBlender, exportBlendToGlb, setCustomBlenderPath } from './blenderCli';
 import { inspectModelDependencies, relinkModelTextures } from './textureInspector';
-import type { ScanOptions } from '../src/types';
+import type { ScanOptions, AppSettings } from '../src/types';
 
 // Enforce single instance lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -184,7 +184,8 @@ function setupIpcHandlers() {
 
   // Open in Blender specifically
   ipcMain.handle('vault:open-in-blender', async (_event, filePath: string) => {
-    const blenderInfo = await detectBlender();
+    const settings = store?.getSettings();
+    const blenderInfo = await detectBlender(settings?.customBlenderPath);
     if (blenderInfo.isAvailable && blenderInfo.executablePath) {
       const { spawn } = await import('child_process');
       spawn(blenderInfo.executablePath, [filePath], { detached: true, stdio: 'ignore' }).unref();
@@ -198,9 +199,71 @@ function setupIpcHandlers() {
     return exportBlendToGlb(blendPath);
   });
 
-  // Get Blender installation info
+  // Get Blender installation info (honoring custom path if saved)
   ipcMain.handle('vault:get-blender-info', async () => {
-    return detectBlender();
+    const settings = store?.getSettings();
+    return detectBlender(settings?.customBlenderPath);
+  });
+
+  // Set / validate custom Blender executable path
+  ipcMain.handle('vault:set-blender-path', async (_event, customPath: string) => {
+    const info = await setCustomBlenderPath(customPath);
+    if (info.isAvailable) {
+      store?.updateSettings({ customBlenderPath: customPath });
+    }
+    return info;
+  });
+
+  // Open file picker specifically for Blender executable
+  ipcMain.handle('vault:pick-blender-executable', async () => {
+    if (!mainWindow) return null;
+    const isWin = process.platform === 'win32';
+    const isMac = process.platform === 'darwin';
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Blender Executable',
+      properties: ['openFile'],
+      filters: isWin
+        ? [
+            { name: 'Blender Executable (blender.exe)', extensions: ['exe'] },
+            { name: 'All Files', extensions: ['*'] },
+          ]
+        : isMac
+        ? [
+            { name: 'Blender Application / Binary', extensions: ['app', ''] },
+            { name: 'All Files', extensions: ['*'] },
+          ]
+        : [{ name: 'All Files', extensions: ['*'] }],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) return null;
+    let selected = result.filePaths[0];
+
+    // If macOS app bundle was selected, resolve internal executable binary
+    if (isMac && selected.endsWith('.app')) {
+      const macBinary = path.join(selected, 'Contents', 'MacOS', 'Blender');
+      if (fs.existsSync(macBinary)) {
+        selected = macBinary;
+      }
+    }
+
+    return selected;
+  });
+
+  // Open external links (e.g. https://www.blender.org/download/)
+  ipcMain.handle('vault:open-external', async (_event, url: string) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      await shell.openExternal(url);
+    }
+  });
+
+  // App Settings IPC
+  ipcMain.handle('vault:get-settings', async () => {
+    return store?.getSettings() || {};
+  });
+
+  ipcMain.handle('vault:update-settings', async (_event, partial: Partial<AppSettings>) => {
+    return store?.updateSettings(partial) || {};
   });
 
   // Save custom thumbnail

@@ -11,6 +11,7 @@ interface HeaderProps {
   totalBytes: number;
   blenderInfo: BlenderInfo | null;
   onOpenScanModal: () => void;
+  onOpenBlenderModal: () => void;
   onClearCache: () => void;
   currentTheme: AppTheme;
   onThemeChange: (theme: AppTheme) => void;
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   totalBytes,
   blenderInfo,
   onOpenScanModal,
+  onOpenBlenderModal,
   onClearCache,
   currentTheme,
   onThemeChange,
@@ -61,12 +63,38 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Status & Actions */}
       <div className="header-actions">
-        {/* Blender status badge */}
-        {blenderInfo?.isAvailable && (
-          <div className="blender-badge" title={`Blender executable: ${blenderInfo.executablePath}`}>
+        {/* Blender status badge / button */}
+        {blenderInfo?.isAvailable ? (
+          <button
+            className="blender-badge"
+            onClick={onOpenBlenderModal}
+            title={`Blender executable: ${blenderInfo.executablePath} (Click to configure or change version)`}
+            style={{
+              cursor: 'pointer',
+              background: 'rgba(234, 88, 12, 0.1)',
+              border: '1px solid rgba(234, 88, 12, 0.25)',
+              transition: 'all 0.15s ease',
+            }}
+          >
             <span className="status-dot"></span>
             <span>Blender {blenderInfo.version || 'Active'}</span>
-          </div>
+          </button>
+        ) : (
+          <button
+            className="blender-badge blender-badge-warning"
+            onClick={onOpenBlenderModal}
+            title="Blender not detected! Click to locate or download Blender for .blend viewing"
+            style={{
+              cursor: 'pointer',
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              color: '#fbbf24',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <span className="status-dot" style={{ background: '#f59e0b' }}></span>
+            <span>Locate Blender</span>
+          </button>
         )}
 
         {/* Total stats */}

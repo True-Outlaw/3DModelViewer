@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ElectronAPI, ModelAsset, ScanOptions, ScanProgress, BlenderInfo } from '../src/types';
+import type { ElectronAPI, ModelAsset, ScanOptions, ScanProgress, BlenderInfo, AppSettings } from '../src/types';
 
 const api: ElectronAPI = {
   getAvailableDrives: () => ipcRenderer.invoke('vault:get-drives'),
@@ -38,6 +38,11 @@ const api: ElectronAPI = {
   openInBlender: (path: string) => ipcRenderer.invoke('vault:open-in-blender', path),
   exportBlendToGlb: (blendPath: string) => ipcRenderer.invoke('vault:export-blend-glb', blendPath),
   getBlenderInfo: () => ipcRenderer.invoke('vault:get-blender-info'),
+  setBlenderPath: (customPath: string) => ipcRenderer.invoke('vault:set-blender-path', customPath),
+  pickBlenderExecutable: () => ipcRenderer.invoke('vault:pick-blender-executable'),
+  openExternal: (url: string) => ipcRenderer.invoke('vault:open-external', url),
+  getSettings: () => ipcRenderer.invoke('vault:get-settings'),
+  updateSettings: (settings: Partial<AppSettings>) => ipcRenderer.invoke('vault:update-settings', settings),
   saveCustomThumbnail: (assetId: string, dataUrl: string) =>
     ipcRenderer.invoke('vault:save-custom-thumbnail', assetId, dataUrl),
   clearCache: () => ipcRenderer.invoke('vault:clear-cache'),

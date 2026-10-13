@@ -2043,3 +2043,7 @@ body {
   flex-shrink: 0;
   box-shadow: 0 0 5px currentColor;
 }
+
+.spin { animation: spin 1s linear infinite; }
+.blender-badge-warning:hover { filter: brightness(1.15); }
+

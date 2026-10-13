@@ -48,7 +48,14 @@ export interface BlenderInfo {
   isAvailable: boolean;
   version?: string;
   executablePath?: string;
+  error?: string;
 }
+
+export interface AppSettings {
+  customBlenderPath?: string;
+  skipBlenderPrompt?: boolean;
+}
+
 export type TextureMapType =
   | 'albedo'
   | 'normal'
@@ -96,6 +103,11 @@ export interface ElectronAPI {
   openInBlender: (path: string) => Promise<void>;
   exportBlendToGlb: (blendPath: string) => Promise<{ success: boolean; glbPath?: string; error?: string }>;
   getBlenderInfo: () => Promise<BlenderInfo>;
+  setBlenderPath: (customPath: string) => Promise<BlenderInfo>;
+  pickBlenderExecutable: () => Promise<string | null>;
+  openExternal: (url: string) => Promise<void>;
+  getSettings: () => Promise<AppSettings>;
+  updateSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>;
   saveCustomThumbnail: (assetId: string, dataUrl: string) => Promise<string>;
   clearCache: () => Promise<void>;
   readLocalFileUrl: (filePath: string) => Promise<string>;
