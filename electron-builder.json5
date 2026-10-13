@@ -53,6 +53,8 @@
         "arch": ["x64"]
       }
     ],
+    "maintainer": "True-Outlaw <contact@true-outlaw.dev>",
+    "desktopName": "model-vault-3d",
     "category": "Graphics"
   }
 }
