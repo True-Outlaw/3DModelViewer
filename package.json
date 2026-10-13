@@ -23,7 +23,7 @@
     "threejs",
     "electron"
   ],
-  "author": "True-Outlaw <contact@true-outlaw.dev>",
+  "author": "True-Outlaw <hello@trueoutlaw.co.za>",
   "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^13.0.3",
