@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import type {
   ModelAsset,
   ModelFormat,
@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   const [assets, setAssets] = useState<ModelAsset[]>([]);
   const [collections, setCollections] = useState<ModelCollection[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [currentView, setCurrentView] = useState<ViewFilter>('all');
   const [selectedFormat, setSelectedFormat] = useState<ModelFormat | 'all'>('all');
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
@@ -108,16 +109,27 @@ export const App: React.FC = () => {
       }
     });
 
-    const unsubAssetFound = window.electronAPI.onScanAssetFound((asset) => {
+    const unsubAssetsBatch = window.electronAPI.onScanAssetsBatch?.((batch) => {
       setAssets((prev) => {
-        const idx = prev.findIndex((a) => a.id === asset.id);
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = asset;
-          return next;
-        }
-        return [asset, ...prev];
+        const idMap = new Map(batch.map((b) => [b.id, b]));
+        const updated = prev.map((a) => idMap.get(a.id) || a);
+        const newItems = batch.filter((b) => !prev.some((a) => a.id === b.id));
+        return [...newItems, ...updated];
       });
+    });
+
+    const unsubAssetFound = window.electronAPI.onScanAssetFound((asset) => {
+      if (!window.electronAPI.onScanAssetsBatch) {
+        setAssets((prev) => {
+          const idx = prev.findIndex((a) => a.id === asset.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = asset;
+            return next;
+          }
+          return [asset, ...prev];
+        });
+      }
     });
 
     const unsubComplete = window.electronAPI.onScanComplete((finalAssets) => {
@@ -128,6 +140,7 @@ export const App: React.FC = () => {
     return () => {
       unsubUpdate();
       unsubProgress();
+      unsubAssetsBatch?.();
       unsubAssetFound();
       unsubComplete();
     };
@@ -179,11 +192,11 @@ export const App: React.FC = () => {
 
   // Filtering & Sorting
   const filteredAssets = useMemo(() => {
+    const q = deferredSearchQuery.trim().toLowerCase();
     return assets
       .filter((asset) => {
         // Search query
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
+        if (q) {
           const matchName = asset.name.toLowerCase().includes(q);
           const matchExt = asset.extension.toLowerCase().includes(q);
           const matchPath = asset.path.toLowerCase().includes(q);
@@ -217,10 +230,16 @@ export const App: React.FC = () => {
             return b.mtime - a.mtime;
           case 'date-asc':
             return a.mtime - b.mtime;
-          case 'name-asc':
-            return a.name.localeCompare(b.name);
-          case 'name-desc':
-            return b.name.localeCompare(a.name);
+          case 'name-asc': {
+            const na = a.name.toLowerCase();
+            const nb = b.name.toLowerCase();
+            return na < nb ? -1 : na > nb ? 1 : 0;
+          }
+          case 'name-desc': {
+            const na = a.name.toLowerCase();
+            const nb = b.name.toLowerCase();
+            return na > nb ? -1 : na < nb ? 1 : 0;
+          }
           case 'size-desc':
             return b.sizeBytes - a.sizeBytes;
           case 'size-asc':
@@ -229,23 +248,28 @@ export const App: React.FC = () => {
             return 0;
         }
       });
-  }, [assets, searchQuery, currentView, selectedFormat, selectedCollectionId, selectedTag, sortOrder]);
+  }, [assets, deferredSearchQuery, currentView, selectedFormat, selectedCollectionId, selectedTag, sortOrder]);
 
   // Handlers
-  const handleToggleFavorite = async (id: string) => {
+  const handleSelectAsset = useCallback((asset: ModelAsset) => {
+    setOpenWithTextureInspector(false);
+    setActiveAssetForViewer(asset);
+  }, []);
+
+  const handleToggleFavorite = useCallback(async (id: string) => {
     const nextState = await window.electronAPI.toggleFavorite(id);
     setAssets((prev) =>
       prev.map((a) => (a.id === id ? { ...a, isFavorite: nextState } : a))
     );
-  };
+  }, []);
 
-  const handleRevealInFolder = (path: string) => {
+  const handleRevealInFolder = useCallback((path: string) => {
     window.electronAPI.revealInFolder(path);
-  };
+  }, []);
 
-  const handleOpenInDefaultApp = (path: string) => {
+  const handleOpenInDefaultApp = useCallback((path: string) => {
     window.electronAPI.openInDefaultApp(path);
-  };
+  }, []);
 
   const handleStartScan = (options: ScanOptions) => {
     setIsScanning(true);
@@ -330,13 +354,13 @@ export const App: React.FC = () => {
     setTimeout(() => setToastMessage(null), 2800);
   };
 
-  const handleContextMenu = (asset: ModelAsset, x: number, y: number) => {
+  const handleContextMenu = useCallback((asset: ModelAsset, x: number, y: number) => {
     setContextMenu({ isOpen: true, x, y, asset });
-  };
+  }, []);
 
-  const handleCloseContextMenu = () => {
+  const handleCloseContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, isOpen: false }));
-  };
+  }, []);
 
   const handleOpenInBlender = (path: string) => {
     if (!blenderInfo?.isAvailable) {
@@ -432,10 +456,7 @@ export const App: React.FC = () => {
           cardSize={cardSize}
           sortOrder={sortOrder}
           onSortChange={setSortOrder}
-          onSelectAsset={(asset) => {
-            setOpenWithTextureInspector(false);
-            setActiveAssetForViewer(asset);
-          }}
+          onSelectAsset={handleSelectAsset}
           onToggleFavorite={handleToggleFavorite}
           onRevealInFolder={handleRevealInFolder}
           onOpenInDefaultApp={handleOpenInDefaultApp}

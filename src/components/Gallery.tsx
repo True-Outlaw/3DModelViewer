@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, HardDrive } from 'lucide-react';
 import type { ModelAsset } from '../types';
 import { ModelCard } from './ModelCard';
@@ -33,6 +33,101 @@ export const Gallery: React.FC<GalleryProps> = ({
   onContextMenu,
   onOpenScanModal,
 }) => {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 1000, height: 700 });
+  const [scrollTop, setScrollTop] = useState(0);
+
+  // Measure container dimensions with ResizeObserver
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setContainerSize({ width, height });
+        }
+      }
+    });
+
+    ro.observe(el);
+    if (el.clientWidth > 0 && el.clientHeight > 0) {
+      setContainerSize({ width: el.clientWidth - 48, height: el.clientHeight });
+    }
+
+    return () => ro.disconnect();
+  }, []);
+
+  // Reset scroll position on sort order changes
+  const prevSortRef = useRef(sortOrder);
+  useEffect(() => {
+    if (prevSortRef.current !== sortOrder) {
+      prevSortRef.current = sortOrder;
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+        setScrollTop(0);
+      }
+    }
+  }, [sortOrder]);
+
+  // Compute grid geometry based on cardSize and container width
+  const gap = 18;
+  const minWidth = useMemo(() => {
+    switch (cardSize) {
+      case 'small':
+        return 180;
+      case 'medium':
+        return 240;
+      case 'large':
+        return 320;
+      case 'cinema':
+        return 440;
+      default:
+        return 240;
+    }
+  }, [cardSize]);
+
+  const availableWidth = Math.max(minWidth, containerSize.width);
+  const numCols = Math.max(1, Math.floor((availableWidth + gap) / (minWidth + gap)));
+  const cardWidth = (availableWidth - (numCols - 1) * gap) / numCols;
+  const previewHeight = cardWidth * 0.75;
+  const metaHeight = cardSize === 'small' ? 70 : cardSize === 'cinema' ? 96 : 84;
+  const cardHeight = Math.round(previewHeight + metaHeight);
+  const rowHeight = cardHeight + gap;
+
+  const totalRows = Math.ceil(assets.length / numCols);
+  const totalHeight = totalRows > 0 ? totalRows * rowHeight - gap : 0;
+
+  // Windowed virtual rows
+  const overscan = 2; // Render 2 buffer rows above and below viewport for instant scrolling
+  const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const endRow = Math.min(
+    totalRows - 1,
+    Math.floor((scrollTop + containerSize.height) / rowHeight) + overscan
+  );
+
+  const visibleRows = useMemo(() => {
+    if (totalRows === 0 || assets.length === 0) return [];
+    const rows = [];
+    for (let r = startRow; r <= endRow; r++) {
+      const startIndex = r * numCols;
+      const rowAssets = assets.slice(startIndex, startIndex + numCols);
+      if (rowAssets.length > 0) {
+        rows.push({
+          rowIndex: r,
+          rowAssets,
+          top: r * rowHeight,
+        });
+      }
+    }
+    return rows;
+  }, [startRow, endRow, numCols, rowHeight, assets, totalRows]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  };
+
   return (
     <div className="gallery-container">
       {/* Toolbar */}
@@ -59,20 +154,49 @@ export const Gallery: React.FC<GalleryProps> = ({
         </div>
       </div>
 
-      {/* Grid Content */}
-      <div className="gallery-scrollable">
+      {/* Grid Content with Windowed Virtualization */}
+      <div
+        className="gallery-scrollable"
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+      >
         {assets.length > 0 ? (
-          <div className={`models-grid grid-${cardSize}`}>
-            {assets.map((asset) => (
-              <ModelCard
-                key={asset.id}
-                asset={asset}
-                onSelect={onSelectAsset}
-                onToggleFavorite={onToggleFavorite}
-                onRevealInFolder={onRevealInFolder}
-                onOpenInDefaultApp={onOpenInDefaultApp}
-                onContextMenu={onContextMenu}
-              />
+          <div
+            className="virtual-grid-container"
+            style={{
+              position: 'relative',
+              height: `${totalHeight}px`,
+              width: '100%',
+              minHeight: '100%',
+            }}
+          >
+            {visibleRows.map(({ rowIndex, rowAssets, top }) => (
+              <div
+                key={rowIndex}
+                className={`virtual-grid-row grid-${cardSize}`}
+                style={{
+                  position: 'absolute',
+                  top: `${top}px`,
+                  left: 0,
+                  right: 0,
+                  height: `${cardHeight}px`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${numCols}, 1fr)`,
+                  gap: `${gap}px`,
+                }}
+              >
+                {rowAssets.map((asset) => (
+                  <ModelCard
+                    key={asset.id}
+                    asset={asset}
+                    onSelect={onSelectAsset}
+                    onToggleFavorite={onToggleFavorite}
+                    onRevealInFolder={onRevealInFolder}
+                    onOpenInDefaultApp={onOpenInDefaultApp}
+                    onContextMenu={onContextMenu}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         ) : (
@@ -100,3 +224,4 @@ export const Gallery: React.FC<GalleryProps> = ({
     </div>
   );
 };
+export default Gallery;

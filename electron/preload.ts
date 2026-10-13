@@ -23,6 +23,14 @@ const api: ElectronAPI = {
     };
   },
 
+  onScanAssetsBatch: (callback: (batch: ModelAsset[]) => void) => {
+    const subscription = (_event: any, batch: ModelAsset[]) => callback(batch);
+    ipcRenderer.on('vault:scan-assets-batch', subscription);
+    return () => {
+      ipcRenderer.removeListener('vault:scan-assets-batch', subscription);
+    };
+  },
+
   onScanComplete: (callback: (assets: ModelAsset[]) => void) => {
     const subscription = (_event: any, assets: ModelAsset[]) => callback(assets);
     ipcRenderer.on('vault:scan-complete', subscription);

@@ -32,15 +32,42 @@ export class AssetStore {
     }
   }
 
+  public getThumbnailsDir(): string {
+    return this.thumbnailsDir;
+  }
+
   private loadFromDisk() {
     try {
       if (fs.existsSync(this.dbPath)) {
         const raw = fs.readFileSync(this.dbPath, 'utf-8');
         const list: ModelAsset[] = JSON.parse(raw);
+        let hasMigrated = false;
         for (const item of list) {
           if (!item.tags) item.tags = [];
           if (!item.collections) item.collections = [];
+
+          // Migrate legacy base64 thumbnails to disk files to dramatically reduce memory and file size
+          if (item.thumbnailUrl && item.thumbnailUrl.startsWith('data:image/')) {
+            try {
+              const match = item.thumbnailUrl.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+              if (match) {
+                const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+                const buffer = Buffer.from(match[2], 'base64');
+                const thumbFile = `${item.id}.${ext}`;
+                const thumbPath = path.join(this.thumbnailsDir, thumbFile);
+                if (!fs.existsSync(thumbPath)) {
+                  fs.writeFileSync(thumbPath, buffer);
+                }
+                item.thumbnailUrl = `file://${thumbPath.replace(/\\/g, '/')}`;
+                hasMigrated = true;
+              }
+            } catch {}
+          }
+
           this.assetsMap.set(item.id, item);
+        }
+        if (hasMigrated) {
+          this.saveToDisk();
         }
       }
 
@@ -64,12 +91,12 @@ export class AssetStore {
   public saveToDisk() {
     try {
       const list = Array.from(this.assetsMap.values());
-      fs.writeFileSync(this.dbPath, JSON.stringify(list, null, 2), 'utf-8');
+      fs.writeFileSync(this.dbPath, JSON.stringify(list), 'utf-8');
 
       const colList = Array.from(this.collectionsMap.values());
-      fs.writeFileSync(this.collectionsPath, JSON.stringify(colList, null, 2), 'utf-8');
+      fs.writeFileSync(this.collectionsPath, JSON.stringify(colList), 'utf-8');
 
-      fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings, null, 2), 'utf-8');
+      fs.writeFileSync(this.settingsPath, JSON.stringify(this.settings), 'utf-8');
     } catch (err) {
       console.error('[AssetStore] Failed to save index to disk:', err);
     }

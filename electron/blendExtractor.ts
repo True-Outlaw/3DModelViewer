@@ -1,11 +1,25 @@
 import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Extracts embedded thumbnail from a Blender .blend file.
  * Blender stores preview thumbnails in a file block with code 'TEST' or 'REND'.
- * If present, extracts and encodes it to a base64 Data URL in 2-5ms.
+ * When outputDir and assetId are provided, writes directly to a disk file for maximum performance.
  */
-export async function extractBlendThumbnail(filePath: string): Promise<string | null> {
+export async function extractBlendThumbnail(
+  filePath: string,
+  outputDir?: string,
+  assetId?: string
+): Promise<string | null> {
+  // Check if already extracted on disk
+  if (outputDir && assetId) {
+    for (const ext of ['.png', '.jpg', '.bmp']) {
+      const existingPath = path.join(outputDir, `${assetId}${ext}`);
+      if (fs.existsSync(existingPath)) {
+        return `file://${existingPath.replace(/\\/g, '/')}`;
+      }
+    }
+  }
   let fd: number | null = null;
   try {
     const stats = await fs.promises.stat(filePath);
@@ -56,9 +70,19 @@ export async function extractBlendThumbnail(filePath: string): Promise<string | 
 
         // Check for direct PNG or JPEG magic bytes
         if (dataBuf[0] === 0x89 && dataBuf[1] === 0x50 && dataBuf[2] === 0x4e && dataBuf[3] === 0x47) {
+          if (outputDir && assetId) {
+            const outPath = path.join(outputDir, `${assetId}.png`);
+            await fs.promises.writeFile(outPath, dataBuf);
+            return `file://${outPath.replace(/\\/g, '/')}`;
+          }
           return `data:image/png;base64,${dataBuf.toString('base64')}`;
         }
         if (dataBuf[0] === 0xff && dataBuf[1] === 0xd8 && dataBuf[2] === 0xff) {
+          if (outputDir && assetId) {
+            const outPath = path.join(outputDir, `${assetId}.jpg`);
+            await fs.promises.writeFile(outPath, dataBuf);
+            return `file://${outPath.replace(/\\/g, '/')}`;
+          }
           return `data:image/jpeg;base64,${dataBuf.toString('base64')}`;
         }
 
@@ -106,6 +130,12 @@ export async function extractBlendThumbnail(filePath: string): Promise<string | 
               bmp[dstIdx + 1] = g;
               bmp[dstIdx + 2] = r;
               bmp[dstIdx + 3] = a;
+            }
+
+            if (outputDir && assetId) {
+              const outPath = path.join(outputDir, `${assetId}.bmp`);
+              await fs.promises.writeFile(outPath, bmp);
+              return `file://${outPath.replace(/\\/g, '/')}`;
             }
 
             return `data:image/bmp;base64,${bmp.toString('base64')}`;

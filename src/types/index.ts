@@ -124,6 +124,7 @@ export interface ElectronAPI {
   cancelScan: () => Promise<void>;
   onScanProgress: (callback: (progress: ScanProgress) => void) => () => void;
   onScanAssetFound: (callback: (asset: ModelAsset) => void) => () => void;
+  onScanAssetsBatch?: (callback: (batch: ModelAsset[]) => void) => () => void;
   onScanComplete: (callback: (assets: ModelAsset[]) => void) => () => void;
   getAssets: () => Promise<ModelAsset[]>;
   toggleFavorite: (id: string) => Promise<boolean>;

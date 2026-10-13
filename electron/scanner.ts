@@ -33,6 +33,11 @@ const IGNORED_DIRECTORY_NAMES = new Set([
 
 export class DiskScanner {
   private isCancelled = false;
+  private thumbnailsDir: string | null = null;
+
+  public setThumbnailsDir(dir: string): void {
+    this.thumbnailsDir = dir;
+  }
 
   public cancel(): void {
     this.isCancelled = true;
@@ -41,7 +46,8 @@ export class DiskScanner {
   public async scan(
     options: ScanOptions,
     onProgress: (progress: ScanProgress) => void,
-    onAssetFound: (asset: ModelAsset) => void
+    onAssetsBatch: (batch: ModelAsset[]) => void,
+    onAssetFound?: (asset: ModelAsset) => void
   ): Promise<ModelAsset[]> {
     this.isCancelled = false;
     const foundAssets: ModelAsset[] = [];
@@ -50,6 +56,20 @@ export class DiskScanner {
     let scannedDirectories = 0;
     let foundModelsCount = 0;
     let lastProgressTime = Date.now();
+
+    const batchBuffer: ModelAsset[] = [];
+    let lastBatchTime = Date.now();
+
+    const flushBatch = (force = false) => {
+      if (batchBuffer.length === 0) return;
+      const now = Date.now();
+      if (force || batchBuffer.length >= 25 || now - lastBatchTime >= 80) {
+        const batch = [...batchBuffer];
+        batchBuffer.length = 0;
+        lastBatchTime = now;
+        onAssetsBatch(batch);
+      }
+    };
 
     const reportProgress = (currentPath: string, force = false) => {
       const now = Date.now();
@@ -85,10 +105,14 @@ export class DiskScanner {
       let thumbnailUrl: string | null = null;
       let thumbnailSource: 'embedded' | 'rendered' | 'placeholder' = 'placeholder';
 
-      // If it's a .blend file, immediately extract embedded preview
+      // If it's a .blend file, immediately extract embedded preview to thumbnail directory
       if (format === 'blend') {
         try {
-          const embedded = await extractBlendThumbnail(filePath);
+          const embedded = await extractBlendThumbnail(
+            filePath,
+            this.thumbnailsDir || undefined,
+            id
+          );
           if (embedded) {
             thumbnailUrl = embedded;
             thumbnailSource = 'embedded';
@@ -113,7 +137,11 @@ export class DiskScanner {
 
       foundAssets.push(asset);
       foundModelsCount++;
-      onAssetFound(asset);
+      batchBuffer.push(asset);
+      if (onAssetFound) {
+        onAssetFound(asset);
+      }
+      flushBatch(false);
     };
 
     const traverseDirectory = async (currentDir: string, currentDepth: number) => {
@@ -177,6 +205,7 @@ export class DiskScanner {
       }
     }
 
+    flushBatch(true);
     reportProgress('Completed', true);
     return foundAssets;
   }

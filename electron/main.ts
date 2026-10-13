@@ -71,6 +71,7 @@ function createWindow() {
 app.whenReady().then(() => {
   store = new AssetStore();
   scanner = new DiskScanner();
+  scanner.setThumbnailsDir(store.getThumbnailsDir());
 
   // Register local file streaming handler with WHATWG authority support
   protocol.handle('vault-asset', (request) => {
@@ -144,8 +145,11 @@ function setupIpcHandlers() {
         (progress) => {
           mainWindow?.webContents.send('vault:scan-progress', progress);
         },
+        (batch) => {
+          store?.upsertBatch(batch);
+          mainWindow?.webContents.send('vault:scan-assets-batch', batch);
+        },
         (asset) => {
-          store?.upsertAsset(asset);
           mainWindow?.webContents.send('vault:scan-asset-found', asset);
         }
       );

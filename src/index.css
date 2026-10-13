@@ -526,8 +526,22 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
 }
 
+/* Virtual Grid Layout */
+.virtual-grid-container {
+  position: relative;
+  width: 100%;
+}
+.virtual-grid-row {
+  overflow: visible;
+  transition: z-index 0.15s ease;
+}
+.virtual-grid-row:hover {
+  z-index: 10;
+}
+
 /* Model Card */
 .model-card {
+  height: 100%;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
@@ -723,6 +737,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
 }
 
 .card-title {

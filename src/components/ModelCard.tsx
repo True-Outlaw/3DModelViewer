@@ -12,14 +12,14 @@ interface ModelCardProps {
   onContextMenu: (asset: ModelAsset, x: number, y: number) => void;
 }
 
-export const ModelCard: React.FC<ModelCardProps> = ({
+export const ModelCard = React.memo<ModelCardProps>(function ModelCard({
   asset,
   onSelect,
   onToggleFavorite,
   onRevealInFolder,
   onOpenInDefaultApp,
   onContextMenu,
-}) => {
+}) {
   const badgeStyle = getFormatBadgeStyle(asset.format);
   const isDraggingRef = useRef(false);
   const dragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -207,4 +207,4 @@ export const ModelCard: React.FC<ModelCardProps> = ({
       </div>
     </div>
   );
-};
+});
