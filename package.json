@@ -1,6 +1,6 @@
 {
   "name": "model-vault-3d",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "High-performance 3D Model Asset Browser & Viewport for Windows",
   "main": "dist-electron/main.js",
   "productName": "Model Vault 3D",
